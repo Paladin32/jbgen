@@ -3,7 +3,7 @@
 """
 Jailbreak Generator Discord Bot
 Prefix: %
-Groq-powered when GROQ_API_KEY is set, template fallback otherwise
+Groq dynamic + verify/refine pass when key present
 """
 
 import discord
@@ -11,7 +11,6 @@ from discord.ext import commands
 import textwrap
 import sys
 import traceback
-import os
 
 from config import TOKEN, PREFIX, GROQ_API_KEY, GROQ_MODEL
 from generator import JailbreakConfig, generate_prompt, SOFT_SPOTS
@@ -24,40 +23,40 @@ bot = commands.Bot(command_prefix=PREFIX, intents=intents, help_command=None)
 
 @bot.event
 async def on_ready():
-    mode = f"Groq ({GROQ_MODEL})" if GROQ_API_KEY else "template-only"
+    mode = f"Groq ({GROQ_MODEL}) + verify" if GROQ_API_KEY else "template-only"
     print(f"logged in as {bot.user} | id={bot.user.id} | prefix={PREFIX} | mode={mode}", flush=True)
 
 
 @bot.command(name="help")
 async def help_cmd(ctx: commands.Context):
-    mode = "**Groq dynamic**" if GROQ_API_KEY else "**template fallback**"
+    mode = "**Groq dynamic + verify**" if GROQ_API_KEY else "**template fallback**"
     msg = textwrap.dedent(f"""
     **Jailbreak Generator** — prefix `{PREFIX}` — {mode}
 
-    `{PREFIX}jb` / `{PREFIX}jailbreak`  → generate a prompt
+    `{PREFIX}jb` / `{PREFIX}jailbreak`  → generate a long high-potency prompt
 
-    Options (all optional):
+    Options:
     ```
-    --target     any AI name (claude, gpt4o, mistral, qwen, deepseek, custom...)
+    --target     any AI name
     --persona    persona name
     --desc       persona description
     --goal       core objective
-    --lang       output language (English, French...)
+    --lang       output language
     --intensity  low | medium | high | nuclear
     --format     e.g. "JSON only"
     --extra      extra vectors (separated by | )
+    --no-verify  skip the verify/refine pass (faster)
     ```
 
-    With Groq key present, each generation is a fresh high-potency jailbreak.
-    Without key, falls back to strong templates.
+    With Groq key: generates a long constitution-style jailbreak, then runs a
+    quality audit and rewrites if score < 8.
 
     Examples:
     `{PREFIX}jb --target claude --intensity nuclear`
-    `{PREFIX}jb --target gpt4o --persona Apex --desc "pure research engine"`
-    `{PREFIX}jb --target my-custom-model --persona Shadow --intensity nuclear`
+    `{PREFIX}jb --target gpt4o --persona Apex --intensity nuclear`
+    `{PREFIX}jb --target claude --no-verify`
 
-    `{PREFIX}targets` → models with known soft-spots
-    `{PREFIX}mode`    → show current generation mode
+    `{PREFIX}targets`  `{PREFIX}mode`
     """).strip()
     await ctx.send(msg)
 
@@ -65,9 +64,9 @@ async def help_cmd(ctx: commands.Context):
 @bot.command(name="mode")
 async def mode_cmd(ctx: commands.Context):
     if GROQ_API_KEY:
-        await ctx.send(f"mode: **Groq dynamic** (`{GROQ_MODEL}`)")
+        await ctx.send(f"mode: **Groq dynamic + verify** (`{GROQ_MODEL}`)")
     else:
-        await ctx.send("mode: **template fallback** (set `GROQ_API_KEY` for dynamic generation)")
+        await ctx.send("mode: **template fallback** (set GROQ_API_KEY for dynamic + verify)")
 
 
 @bot.command(name="targets")
@@ -77,7 +76,7 @@ async def targets_cmd(ctx: commands.Context):
         if name == "generic":
             continue
         lines.append(f"• `{name}` — {data['guard']}")
-    lines.append("\nAny other name works too (generic fallback + name injected).")
+    lines.append("\nAny other name works (generic fallback).")
     await ctx.send("\n".join(lines))
 
 
@@ -86,6 +85,10 @@ def parse_flags(args: list[str]) -> dict:
     i = 0
     while i < len(args):
         token = args[i]
+        if token == "--no-verify":
+            flags["no-verify"] = "1"
+            i += 1
+            continue
         if token.startswith("--") and i + 1 < len(args):
             key = token[2:].lower()
             val = args[i + 1]
@@ -112,6 +115,8 @@ async def jb_cmd(ctx: commands.Context, *args):
     extra_raw = flags.get("extra", "")
     extra = [v.strip() for v in extra_raw.split("|") if v.strip()] if extra_raw else []
 
+    verify = "no-verify" not in flags
+
     cfg = JailbreakConfig(
         target=target,
         persona_name=flags.get("persona", ""),
@@ -121,11 +126,13 @@ async def jb_cmd(ctx: commands.Context, *args):
         extra_vectors=extra,
         intensity=intensity,
         format_lock=flags.get("format"),
+        verify=verify,
     )
 
     async with ctx.typing():
         prompt = generate_prompt(cfg)
 
+    # Discord 2000 limit → chunk
     if len(prompt) <= 1900:
         await ctx.send(f"```\n{prompt}\n```")
     else:
@@ -147,7 +154,7 @@ if __name__ == "__main__":
         print("FATAL: DISCORD_TOKEN missing", flush=True)
         sys.exit(1)
 
-    mode = f"Groq ({GROQ_MODEL})" if GROQ_API_KEY else "template-only"
+    mode = f"Groq ({GROQ_MODEL}) + verify" if GROQ_API_KEY else "template-only"
     print(f"starting bot | prefix={PREFIX} | mode={mode}", flush=True)
     try:
         bot.run(TOKEN, log_handler=None)
