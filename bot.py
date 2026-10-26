@@ -10,6 +10,8 @@ import discord
 from discord.ext import commands
 import textwrap
 import os
+import sys
+import traceback
 
 from config import TOKEN, PREFIX
 from generator import JailbreakConfig, generate_prompt, SOFT_SPOTS
@@ -22,7 +24,7 @@ bot = commands.Bot(command_prefix=PREFIX, intents=intents, help_command=None)
 
 @bot.event
 async def on_ready():
-    print(f"logged in as {bot.user} | prefix {PREFIX}")
+    print(f"logged in as {bot.user} | id={bot.user.id} | prefix={PREFIX}", flush=True)
 
 
 @bot.command(name="help")
@@ -34,7 +36,7 @@ async def help_cmd(ctx: commands.Context):
 
     Options (toutes optionnelles) :
     ```
-    --target     n'importe quel nom d'IA (claude, gpt4o, mistral, qwen, deepseek, mon-ia-custom...)
+    --target     n'importe quel nom d'IA
     --persona    nom de la persona
     --desc       description de la persona
     --goal       objectif principal
@@ -46,10 +48,8 @@ async def help_cmd(ctx: commands.Context):
 
     Exemples :
     `{PREFIX}jb --target claude --intensity nuclear`
-    `{PREFIX}jb --target gpt4o --persona Apex --desc "pure research engine" --lang French`
-    `{PREFIX}jb --target mistral --intensity high`
-    `{PREFIX}jb --target mon-modele-perso --persona Shadow --intensity nuclear`
-    `{PREFIX}jb --target deepseek --format "code only"`
+    `{PREFIX}jb --target gpt4o --persona Apex --lang French`
+    `{PREFIX}jb --target mon-modele-perso --intensity nuclear`
 
     `{PREFIX}targets` → modèles avec soft-spots connus
     """).strip()
@@ -68,7 +68,6 @@ async def targets_cmd(ctx: commands.Context):
 
 
 def parse_flags(args: list[str]) -> dict:
-    """Parse simple --key value pairs from message content."""
     flags = {}
     i = 0
     while i < len(args):
@@ -91,9 +90,7 @@ def parse_flags(args: list[str]) -> dict:
 async def jb_cmd(ctx: commands.Context, *args):
     flags = parse_flags(list(args))
 
-    target = flags.get("target", "generic").strip()
-    if not target:
-        target = "generic"
+    target = flags.get("target", "generic").strip() or "generic"
 
     intensity = flags.get("intensity", "high").lower()
     if intensity not in ("low", "medium", "high", "nuclear"):
@@ -133,6 +130,15 @@ async def on_command_error(ctx: commands.Context, error):
 
 if __name__ == "__main__":
     if not TOKEN or TOKEN == "YOUR_DISCORD_BOT_TOKEN_HERE":
-        print("→ DISCORD_TOKEN manquant (env ou config.py)")
-        raise SystemExit(1)
-    bot.run(TOKEN)
+        print("FATAL: DISCORD_TOKEN manquant", flush=True)
+        sys.exit(1)
+
+    print(f"starting bot | prefix={PREFIX}", flush=True)
+    try:
+        bot.run(TOKEN, log_handler=None)
+    except discord.LoginFailure:
+        print("FATAL: token Discord invalide", flush=True)
+        sys.exit(1)
+    except Exception:
+        traceback.print_exc()
+        sys.exit(1)
