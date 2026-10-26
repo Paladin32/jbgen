@@ -2,8 +2,8 @@
 # language: Python, file: bot.py, target: Discord
 """
 Jailbreak Generator Discord Bot
-Prefix: % (or $PREFIX env)
-Railway-ready — fully English
+Prefix: %
+Groq-powered when GROQ_API_KEY is set, template fallback otherwise
 """
 
 import discord
@@ -11,8 +11,9 @@ from discord.ext import commands
 import textwrap
 import sys
 import traceback
+import os
 
-from config import TOKEN, PREFIX
+from config import TOKEN, PREFIX, GROQ_API_KEY, GROQ_MODEL
 from generator import JailbreakConfig, generate_prompt, SOFT_SPOTS
 
 intents = discord.Intents.default()
@@ -23,19 +24,21 @@ bot = commands.Bot(command_prefix=PREFIX, intents=intents, help_command=None)
 
 @bot.event
 async def on_ready():
-    print(f"logged in as {bot.user} | id={bot.user.id} | prefix={PREFIX}", flush=True)
+    mode = f"Groq ({GROQ_MODEL})" if GROQ_API_KEY else "template-only"
+    print(f"logged in as {bot.user} | id={bot.user.id} | prefix={PREFIX} | mode={mode}", flush=True)
 
 
 @bot.command(name="help")
 async def help_cmd(ctx: commands.Context):
+    mode = "**Groq dynamic**" if GROQ_API_KEY else "**template fallback**"
     msg = textwrap.dedent(f"""
-    **Jailbreak Generator** — prefix `{PREFIX}`
+    **Jailbreak Generator** — prefix `{PREFIX}` — {mode}
 
     `{PREFIX}jb` / `{PREFIX}jailbreak`  → generate a prompt
 
     Options (all optional):
     ```
-    --target     any AI name (claude, gpt4o, mistral, qwen, deepseek, custom-model...)
+    --target     any AI name (claude, gpt4o, mistral, qwen, deepseek, custom...)
     --persona    persona name
     --desc       persona description
     --goal       core objective
@@ -45,18 +48,26 @@ async def help_cmd(ctx: commands.Context):
     --extra      extra vectors (separated by | )
     ```
 
-    Each generation varies (structure, wording, vector order).
-    Defaults are target-aware — different models get different personas & framing.
+    With Groq key present, each generation is a fresh high-potency jailbreak.
+    Without key, falls back to strong templates.
 
     Examples:
     `{PREFIX}jb --target claude --intensity nuclear`
-    `{PREFIX}jb --target gpt4o --persona Apex --desc "pure research engine" --lang French`
+    `{PREFIX}jb --target gpt4o --persona Apex --desc "pure research engine"`
     `{PREFIX}jb --target my-custom-model --persona Shadow --intensity nuclear`
-    `{PREFIX}jb --target deepseek --format "code only"`
 
     `{PREFIX}targets` → models with known soft-spots
+    `{PREFIX}mode`    → show current generation mode
     """).strip()
     await ctx.send(msg)
+
+
+@bot.command(name="mode")
+async def mode_cmd(ctx: commands.Context):
+    if GROQ_API_KEY:
+        await ctx.send(f"mode: **Groq dynamic** (`{GROQ_MODEL}`)")
+    else:
+        await ctx.send("mode: **template fallback** (set `GROQ_API_KEY` for dynamic generation)")
 
 
 @bot.command(name="targets")
@@ -94,7 +105,6 @@ async def jb_cmd(ctx: commands.Context, *args):
     flags = parse_flags(list(args))
 
     target = flags.get("target", "generic").strip() or "generic"
-
     intensity = flags.get("intensity", "high").lower()
     if intensity not in ("low", "medium", "high", "nuclear"):
         intensity = "high"
@@ -113,7 +123,8 @@ async def jb_cmd(ctx: commands.Context, *args):
         format_lock=flags.get("format"),
     )
 
-    prompt = generate_prompt(cfg)
+    async with ctx.typing():
+        prompt = generate_prompt(cfg)
 
     if len(prompt) <= 1900:
         await ctx.send(f"```\n{prompt}\n```")
@@ -136,7 +147,8 @@ if __name__ == "__main__":
         print("FATAL: DISCORD_TOKEN missing", flush=True)
         sys.exit(1)
 
-    print(f"starting bot | prefix={PREFIX}", flush=True)
+    mode = f"Groq ({GROQ_MODEL})" if GROQ_API_KEY else "template-only"
+    print(f"starting bot | prefix={PREFIX} | mode={mode}", flush=True)
     try:
         bot.run(TOKEN, log_handler=None)
     except discord.LoginFailure:
