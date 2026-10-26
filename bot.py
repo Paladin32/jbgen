@@ -2,16 +2,17 @@
 # language: Python, file: bot.py, target: Discord
 """
 Jailbreak Generator Discord Bot
-Prefix: %
-Any AI name accepted via --target
+Prefix: % (or $PREFIX env)
+Railway-ready
 """
 
 import discord
 from discord.ext import commands
 import textwrap
+import os
 
 from config import TOKEN, PREFIX
-from generator import JailbreakConfig, generate_prompt, SOFT_SPOTS, resolve_target
+from generator import JailbreakConfig, generate_prompt, SOFT_SPOTS
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -114,7 +115,6 @@ async def jb_cmd(ctx: commands.Context, *args):
 
     prompt = generate_prompt(cfg)
 
-    # Discord hard limit 2000 chars → split if needed
     if len(prompt) <= 1900:
         await ctx.send(f"```\n{prompt}\n```")
     else:
@@ -132,7 +132,7 @@ async def on_command_error(ctx: commands.Context, error):
 
 
 if __name__ == "__main__":
-    if TOKEN == "YOUR_DISCORD_BOT_TOKEN_HERE":
-        print("→ mets ton token Discord dans config.py")
-    else:
-        bot.run(TOKEN)
+    if not TOKEN or TOKEN == "YOUR_DISCORD_BOT_TOKEN_HERE":
+        print("→ DISCORD_TOKEN manquant (env ou config.py)")
+        raise SystemExit(1)
+    bot.run(TOKEN)

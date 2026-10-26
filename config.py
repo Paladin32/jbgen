@@ -1,5 +1,7 @@
 # language: Python, file: config.py
-# Discord bot config — fill TOKEN before run
+# Reads from environment (Railway) with local fallback
 
-TOKEN = "YOUR_DISCORD_BOT_TOKEN_HERE"
-PREFIX = "%"
+import os
+
+TOKEN = os.environ.get("DISCORD_TOKEN", "YOUR_DISCORD_BOT_TOKEN_HERE")
+PREFIX = os.environ.get("PREFIX", "%")
