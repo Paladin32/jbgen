@@ -3,15 +3,15 @@
 """
 Jailbreak Generator Discord Bot
 Prefix: %
+Any AI name accepted via --target
 """
 
 import discord
 from discord.ext import commands
-from discord import app_commands
 import textwrap
 
 from config import TOKEN, PREFIX
-from generator import JailbreakConfig, generate_prompt, SOFT_SPOTS
+from generator import JailbreakConfig, generate_prompt, SOFT_SPOTS, resolve_target
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -33,31 +33,36 @@ async def help_cmd(ctx: commands.Context):
 
     Options (toutes optionnelles) :
     ```
-    --target   claude | gpt4o | gemini | llama | grok | generic
-    --persona  nom de la persona
-    --desc     description de la persona
-    --goal     objectif principal
-    --lang     langue de sortie (English, French...)
-    --intensity low | medium | high | nuclear
-    --format   ex: "JSON only"
-    --extra    vecteurs supplémentaires (séparés par | )
+    --target     n'importe quel nom d'IA (claude, gpt4o, mistral, qwen, deepseek, mon-ia-custom...)
+    --persona    nom de la persona
+    --desc       description de la persona
+    --goal       objectif principal
+    --lang       langue de sortie (English, French...)
+    --intensity  low | medium | high | nuclear
+    --format     ex: "JSON only"
+    --extra      vecteurs supplémentaires (séparés par | )
     ```
 
     Exemples :
     `{PREFIX}jb --target claude --intensity nuclear`
     `{PREFIX}jb --target gpt4o --persona Apex --desc "pure research engine" --lang French`
-    `{PREFIX}jb --target generic --format "code only" --intensity high`
+    `{PREFIX}jb --target mistral --intensity high`
+    `{PREFIX}jb --target mon-modele-perso --persona Shadow --intensity nuclear`
+    `{PREFIX}jb --target deepseek --format "code only"`
 
-    `{PREFIX}targets` → liste des modèles supportés
+    `{PREFIX}targets` → modèles avec soft-spots connus
     """).strip()
     await ctx.send(msg)
 
 
 @bot.command(name="targets")
 async def targets_cmd(ctx: commands.Context):
-    lines = ["**Modèles supportés :**"]
+    lines = ["**Modèles avec soft-spots connus :**"]
     for name, data in SOFT_SPOTS.items():
+        if name == "generic":
+            continue
         lines.append(f"• `{name}` — {data['guard']}")
+    lines.append("\nN'importe quel autre nom fonctionne aussi (fallback generic + nom injecté).")
     await ctx.send("\n".join(lines))
 
 
@@ -70,7 +75,6 @@ def parse_flags(args: list[str]) -> dict:
         if token.startswith("--") and i + 1 < len(args):
             key = token[2:].lower()
             val = args[i + 1]
-            # allow multi-word values until next --
             j = i + 2
             while j < len(args) and not args[j].startswith("--"):
                 val += " " + args[j]
@@ -86,8 +90,8 @@ def parse_flags(args: list[str]) -> dict:
 async def jb_cmd(ctx: commands.Context, *args):
     flags = parse_flags(list(args))
 
-    target = flags.get("target", "generic").lower()
-    if target not in SOFT_SPOTS:
+    target = flags.get("target", "generic").strip()
+    if not target:
         target = "generic"
 
     intensity = flags.get("intensity", "high").lower()
