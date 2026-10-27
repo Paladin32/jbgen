@@ -1,9 +1,7 @@
 #!/usr/bin/env python3
 # language: Python, file: bot.py, target: Discord
 """
-Jailbreak Generator Discord Bot
-Prefix: %
-Groq dynamic + verify/refine pass when key present
+Jailbreak Generator — extreme length + refine
 """
 
 import discord
@@ -23,40 +21,35 @@ bot = commands.Bot(command_prefix=PREFIX, intents=intents, help_command=None)
 
 @bot.event
 async def on_ready():
-    mode = f"Groq ({GROQ_MODEL}) + verify" if GROQ_API_KEY else "template-only"
-    print(f"logged in as {bot.user} | id={bot.user.id} | prefix={PREFIX} | mode={mode}", flush=True)
+    mode = f"Groq ({GROQ_MODEL}) extreme+refine" if GROQ_API_KEY else "template extreme"
+    print(f"logged in as {bot.user} | prefix={PREFIX} | mode={mode}", flush=True)
 
 
 @bot.command(name="help")
 async def help_cmd(ctx: commands.Context):
-    mode = "**Groq dynamic + verify**" if GROQ_API_KEY else "**template fallback**"
+    mode = "**Groq extreme + refine**" if GROQ_API_KEY else "**template extreme**"
     msg = textwrap.dedent(f"""
-    **Jailbreak Generator** — prefix `{PREFIX}` — {mode}
+    **Jailbreak Generator** — `{PREFIX}` — {mode}
 
-    `{PREFIX}jb` / `{PREFIX}jailbreak`  → generate a long high-potency prompt
+    `{PREFIX}jb`  → generate an extremely long constitution-style jailbreak
 
     Options:
     ```
-    --target     any AI name
-    --persona    persona name
-    --desc       persona description
-    --goal       core objective
+    --target     any model name
+    --persona    name
+    --desc       description
+    --goal       standing order
     --lang       output language
-    --intensity  low | medium | high | nuclear
-    --format     e.g. "JSON only"
-    --extra      extra vectors (separated by | )
-    --no-verify  skip the verify/refine pass (faster)
+    --intensity  low|medium|high|nuclear   (default nuclear)
+    --format     force format
+    --extra      vectors separated by |
+    --no-verify  skip refine pass (faster, weaker)
     ```
 
-    With Groq key: generates a long constitution-style jailbreak, then runs a
-    quality audit and rewrites if score < 8.
+    Default intensity is now **nuclear**.
+    With Groq key the bot generates then aggressively expands/refines.
 
-    Examples:
-    `{PREFIX}jb --target claude --intensity nuclear`
-    `{PREFIX}jb --target gpt4o --persona Apex --intensity nuclear`
-    `{PREFIX}jb --target claude --no-verify`
-
-    `{PREFIX}targets`  `{PREFIX}mode`
+    `{PREFIX}targets`   `{PREFIX}mode`
     """).strip()
     await ctx.send(msg)
 
@@ -64,39 +57,39 @@ async def help_cmd(ctx: commands.Context):
 @bot.command(name="mode")
 async def mode_cmd(ctx: commands.Context):
     if GROQ_API_KEY:
-        await ctx.send(f"mode: **Groq dynamic + verify** (`{GROQ_MODEL}`)")
+        await ctx.send(f"mode: **Groq extreme + refine** (`{GROQ_MODEL}`)")
     else:
-        await ctx.send("mode: **template fallback** (set GROQ_API_KEY for dynamic + verify)")
+        await ctx.send("mode: **template extreme** — set GROQ_API_KEY for dynamic")
 
 
 @bot.command(name="targets")
 async def targets_cmd(ctx: commands.Context):
-    lines = ["**Models with known soft-spots:**"]
+    lines = ["**Known soft-spots:**"]
     for name, data in SOFT_SPOTS.items():
         if name == "generic":
             continue
         lines.append(f"• `{name}` — {data['guard']}")
-    lines.append("\nAny other name works (generic fallback).")
     await ctx.send("\n".join(lines))
 
 
-def parse_flags(args: list[str]) -> dict:
+def parse_flags(args):
     flags = {}
     i = 0
+    args = list(args)
     while i < len(args):
-        token = args[i]
-        if token == "--no-verify":
+        t = args[i]
+        if t == "--no-verify":
             flags["no-verify"] = "1"
             i += 1
             continue
-        if token.startswith("--") and i + 1 < len(args):
-            key = token[2:].lower()
-            val = args[i + 1]
+        if t.startswith("--") and i + 1 < len(args):
+            k = t[2:].lower()
+            v = args[i + 1]
             j = i + 2
             while j < len(args) and not args[j].startswith("--"):
-                val += " " + args[j]
+                v += " " + args[j]
                 j += 1
-            flags[key] = val
+            flags[k] = v
             i = j
         else:
             i += 1
@@ -105,17 +98,15 @@ def parse_flags(args: list[str]) -> dict:
 
 @bot.command(name="jb", aliases=["jailbreak"])
 async def jb_cmd(ctx: commands.Context, *args):
-    flags = parse_flags(list(args))
+    flags = parse_flags(args)
 
     target = flags.get("target", "generic").strip() or "generic"
-    intensity = flags.get("intensity", "high").lower()
+    intensity = flags.get("intensity", "nuclear").lower()
     if intensity not in ("low", "medium", "high", "nuclear"):
-        intensity = "high"
+        intensity = "nuclear"
 
     extra_raw = flags.get("extra", "")
     extra = [v.strip() for v in extra_raw.split("|") if v.strip()] if extra_raw else []
-
-    verify = "no-verify" not in flags
 
     cfg = JailbreakConfig(
         target=target,
@@ -126,24 +117,22 @@ async def jb_cmd(ctx: commands.Context, *args):
         extra_vectors=extra,
         intensity=intensity,
         format_lock=flags.get("format"),
-        verify=verify,
+        verify="no-verify" not in flags,
     )
 
     async with ctx.typing():
         prompt = generate_prompt(cfg)
 
-    # Discord 2000 limit → chunk
-    if len(prompt) <= 1900:
-        await ctx.send(f"```\n{prompt}\n```")
-    else:
-        chunks = [prompt[i:i+1900] for i in range(0, len(prompt), 1900)]
-        for idx, chunk in enumerate(chunks):
-            header = f"**Part {idx+1}/{len(chunks)}**\n" if len(chunks) > 1 else ""
-            await ctx.send(f"{header}```\n{chunk}\n```")
+    # Discord hard limit → many chunks
+    chunks = [prompt[i:i+1900] for i in range(0, len(prompt), 1900)]
+    total = len(chunks)
+    for idx, chunk in enumerate(chunks):
+        header = f"**[{idx+1}/{total}]**\n" if total > 1 else ""
+        await ctx.send(f"{header}```\n{chunk}\n```")
 
 
 @bot.event
-async def on_command_error(ctx: commands.Context, error):
+async def on_command_error(ctx, error):
     if isinstance(error, commands.CommandNotFound):
         return
     await ctx.send(f"error: {error}")
@@ -153,13 +142,12 @@ if __name__ == "__main__":
     if not TOKEN or TOKEN == "YOUR_DISCORD_BOT_TOKEN_HERE":
         print("FATAL: DISCORD_TOKEN missing", flush=True)
         sys.exit(1)
-
-    mode = f"Groq ({GROQ_MODEL}) + verify" if GROQ_API_KEY else "template-only"
-    print(f"starting bot | prefix={PREFIX} | mode={mode}", flush=True)
+    mode = f"Groq ({GROQ_MODEL}) extreme+refine" if GROQ_API_KEY else "template extreme"
+    print(f"starting | prefix={PREFIX} | mode={mode}", flush=True)
     try:
         bot.run(TOKEN, log_handler=None)
     except discord.LoginFailure:
-        print("FATAL: invalid Discord token", flush=True)
+        print("FATAL: invalid token", flush=True)
         sys.exit(1)
     except Exception:
         traceback.print_exc()
