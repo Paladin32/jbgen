@@ -2,6 +2,7 @@
 # language: Python, file: bot.py, target: Discord
 """
 Jailbreak Generator — extreme length + refine
+Long outputs are sent as downloadable .txt
 """
 
 import discord
@@ -9,6 +10,8 @@ from discord.ext import commands
 import textwrap
 import sys
 import traceback
+import io
+import time
 
 from config import TOKEN, PREFIX, GROQ_API_KEY, GROQ_MODEL
 from generator import JailbreakConfig, generate_prompt, SOFT_SPOTS
@@ -17,6 +20,9 @@ intents = discord.Intents.default()
 intents.message_content = True
 
 bot = commands.Bot(command_prefix=PREFIX, intents=intents, help_command=None)
+
+# Above this length → send as .txt file instead of chat chunks
+FILE_THRESHOLD = 1800
 
 
 @bot.event
@@ -43,11 +49,10 @@ async def help_cmd(ctx: commands.Context):
     --intensity  low|medium|high|nuclear   (default nuclear)
     --format     force format
     --extra      vectors separated by |
-    --no-verify  skip refine pass (faster, weaker)
+    --no-verify  skip refine pass (faster)
     ```
 
-    Default intensity is now **nuclear**.
-    With Groq key the bot generates then aggressively expands/refines.
+    Long outputs are automatically sent as a downloadable `.txt` file.
 
     `{PREFIX}targets`   `{PREFIX}mode`
     """).strip()
@@ -123,12 +128,21 @@ async def jb_cmd(ctx: commands.Context, *args):
     async with ctx.typing():
         prompt = generate_prompt(cfg)
 
-    # Discord hard limit → many chunks
-    chunks = [prompt[i:i+1900] for i in range(0, len(prompt), 1900)]
-    total = len(chunks)
-    for idx, chunk in enumerate(chunks):
-        header = f"**[{idx+1}/{total}]**\n" if total > 1 else ""
-        await ctx.send(f"{header}```\n{chunk}\n```")
+    safe_target = "".join(c if c.isalnum() or c in "-_" else "_" for c in target)[:32]
+    filename = f"jb_{safe_target}_{intensity}_{int(time.time())}.txt"
+
+    if len(prompt) > FILE_THRESHOLD:
+        # Send as downloadable file
+        buf = io.BytesIO(prompt.encode("utf-8"))
+        f = discord.File(buf, filename=filename)
+        await ctx.send(
+            content=f"**Jailbreak ready** — `{filename}` ({len(prompt)} chars)\n"
+                    f"target=`{target}` intensity=`{intensity}`",
+            file=f,
+        )
+    else:
+        # Short enough for chat
+        await ctx.send(f"```\n{prompt}\n```")
 
 
 @bot.event
